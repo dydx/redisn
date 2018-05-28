@@ -22,6 +22,12 @@ const redisn = require('redisn');
 // TODO
 ```
 
+## Benchmarks
+
+Benchmarks below are from early alpha code / experiments:
+
+![screenshot](https://i.imgur.com/i3RfBih.png)
+
 ## License
 
 [APACHE-2.0](./LICENSE)
