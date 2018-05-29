@@ -8,6 +8,11 @@ const Commander = require('./../Commander/Commander');
 const MAX_BUFFER_SIZE = 4 * 1024 * 1024; // ~4 mb
 const MAX_QUEUED = 120; // appears to be a good a number
 
+const STATUS_CONNECTED = 'connected';
+const STATUS_CONNECTING = 'connecting';
+const STATUS_DISCONNECTED = 'disconnected';
+const STATUS_DISCONNECTING = 'disconnecting';
+
 export type StandaloneOptionsType = {
   host: ?string,
   port: ?number,
@@ -24,11 +29,16 @@ export type StandaloneOptionsType = {
  * Built in auto-pipelining
  */
 class Standalone {
-  status: 'disconnected' | 'connecting' | 'connected';
+  status:
+    | 'disconnected'
+    | 'disconnecting'
+    | 'connecting'
+    | 'connected'
+    | 'error';
 
   constructor(options: StandaloneOptionsType) {
     this.options = {};
-    this.status = 'disconnected';
+    this.status = STATUS_DISCONNECTED;
 
     this.commander = options.commander || new Commander();
 
@@ -49,6 +59,7 @@ class Standalone {
 
     // cheap re-use of the sockets event emitter.
     this.on = this.socket.on.bind(this.socket);
+    this.emit = this.socket.emit.bind(this.socket);
     this.once = this.socket.once.bind(this.socket);
 
     if (options.path) {
@@ -60,7 +71,7 @@ class Standalone {
     }
 
     if (options.tls) {
-      Object.assign(this.options, options.tls);
+      Object.assign(this.options, { tls: options.tls });
       this.options.socket = this.socket;
     }
   }
@@ -70,40 +81,31 @@ class Standalone {
    * @returns {*}
    */
   connect() {
-    if (this.status === 'connected' || this.status === 'connecting') {
+    if (this.status === STATUS_CONNECTED || this.status === STATUS_CONNECTING) {
       throw new Error('Connector is already connecting or connected!');
     }
 
-    this.status = 'connecting';
+    this.status = STATUS_CONNECTING;
 
-    // internally listen to connect event
-    this.once('connect', () => {
-      this.status = 'connected';
-      this.writePipeline();
-    });
-
-    // TODO re-connect logic if not disconnecting
-    this.once(
-      'close',
-      error => (this.status = error ? 'error' : 'disconnected'),
-    );
+    this.once('close', this._onClose);
+    this.once('connect', this._onConnect);
+    // TODO connect timeout checks
 
     if (this.options.tls) {
       tls.connect(Object.assign({ socket: this.socket }, this.options));
+    } else {
+      this.socket.connect(this.options);
     }
 
-    this.socket.connect(this.options);
-
     this.on('data', this.parser.execute.bind(this.parser));
-    return undefined;
   }
 
   /**
    *
    */
   disconnect() {
-    this.status = 'disconnected';
-    if (this.socket) {
+    if (this.socket && this.status === STATUS_CONNECTED) {
+      this.status = STATUS_DISCONNECTED;
       this.socket.end();
     }
   }
@@ -115,7 +117,7 @@ class Standalone {
    * @param forceWrite
    * @returns {string}
    */
-  write(cmd, args, forceWrite) {
+  write(cmd: string, args: Array, forceWrite: boolean = false) {
     this.pipelineBuffer += toWritable(cmd, args);
 
     this.pipelineQueued++;
@@ -144,6 +146,21 @@ class Standalone {
       this.socket.write(this.pipelineBuffer);
       this.pipelineBuffer = '';
       this.pipelineQueued = 0;
+    }
+  }
+
+  _onConnect() {
+    this.status = STATUS_CONNECTED;
+    // writes any buffered commands
+    this.writePipeline();
+  }
+
+  _onClose(error) {
+    if (this.status === STATUS_DISCONNECTING) {
+      this.status = STATUS_DISCONNECTED;
+    } else {
+      // TODO handle error logic & reconnect logic
+      this.status = error ? 'error' : 'disconnected';
     }
   }
 }
