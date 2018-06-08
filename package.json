@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "cluster-key-slot": "^1.0.12",
-    "denque": "^1.2.6",
+    "denque": "^1.3.0",
     "redis-commands": "^1.3.5",
     "redis-parser": "^3.0.0",
     "redis-writable": "^1.1.3"
@@ -41,15 +41,15 @@
     "eslint": "^4.19.1",
     "eslint-config-airbnb": "^16.1.0",
     "eslint-config-prettier": "^2.9.0",
-    "eslint-plugin-flowtype": "^2.30.4",
+    "eslint-plugin-flowtype": "^2.49.3",
     "eslint-plugin-import": "^2.2.0",
     "eslint-plugin-jsx-a11y": "^6.0.3",
     "eslint-plugin-prettier": "^2.0.1",
-    "eslint-plugin-react": "^7.8.2",
-    "flow-bin": "^0.73.0",
-    "jest": "^23.0.1",
+    "eslint-plugin-react": "^7.9.1",
+    "flow-bin": "^0.74.0",
+    "jest": "^23.1.0",
     "npm-release": "^1.0.0",
-    "prettier": "^1.13.0"
+    "prettier": "^1.13.4"
   },
   "babel": {
     "presets": [
@@ -84,7 +84,10 @@
       "es6": true
     },
     "globals": {
-      "ReactClass": true
+      "ReactClass": true,
+      "describe": true,
+      "expect": true,
+      "test": true
     },
     "parserOptions": {
       "sourceType": "module"
