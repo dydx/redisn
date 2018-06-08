@@ -1,6 +1,7 @@
 import type { PendingPromiseType } from './../Utils';
 
 const Denque = require('denque');
+const Parser = require('./../Parser/Parser');
 const { promisePending } = require('./../Utils');
 
 export type CommandQueueItemType = {
@@ -14,17 +15,12 @@ export type CommandQueueType = {
   push: CommandQueueItemType => void,
 };
 
-class Commander {
+class Commander extends Parser {
   queue: CommandQueueType;
   pending: () => PendingPromiseType;
-
   constructor() {
+    super();
     this.queue = new Denque();
-
-    // TODO hide these
-    this.returnReply = this._returnReply.bind(this);
-    this.returnError = this._returnError.bind(this);
-    this.returnFatalError = this._returnFatalError.bind(this);
   }
 
   /**
@@ -32,7 +28,7 @@ class Commander {
    * @param error
    * @private
    */
-  _returnError(error: Error) {
+  returnError(error: Error) {
     this.queue.shift().deferred.reject(error);
   }
 
@@ -41,7 +37,7 @@ class Commander {
    * @param reply
    * @private
    */
-  _returnReply(reply: string | Array) {
+  returnReply(reply: string | Array) {
     // TODO custom response parsers
     this.queue.shift().deferred.resolve(reply);
   }
@@ -52,7 +48,7 @@ class Commander {
    * @param error
    * @private
    */
-  _returnFatalError(error: Error) {
+  returnFatalError(error: Error) {
     // TODO clear queue and re-connect?
     this.queue.shift().deferred.reject(error);
   }

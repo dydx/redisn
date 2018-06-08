@@ -1,17 +1,20 @@
 const tls = require('tls');
 const { Socket } = require('net');
-const Parser = require('redis-parser');
 const toWritable = require('redis-writable');
 
+const { merge, defaults, strings, proxyThisAndThat } = require('./../Utils');
 const Commander = require('./../Commander/Commander');
 
+const MAX_QUEUED = 120;
 const MAX_BUFFER_SIZE = 4 * 1024 * 1024; // ~4 mb
-const MAX_QUEUED = 120; // appears to be a good a number
 
-const STATUS_CONNECTED = 'connected';
-const STATUS_CONNECTING = 'connecting';
-const STATUS_DISCONNECTED = 'disconnected';
-const STATUS_DISCONNECTING = 'disconnecting';
+const {
+  STATUS_CONNECTED,
+  STATUS_CONNECTING,
+  STATUS_DISCONNECTED,
+  STATUS_DISCONNECTING,
+  ERROR_ALREADY_CONNECTED,
+} = strings;
 
 export type StandaloneOptionsType = {
   host: ?string,
@@ -26,54 +29,45 @@ export type StandaloneOptionsType = {
  * Handles all communication with a single redis server
  * this includes connecting, writing resp and parsing resp.
  *
- * Built in auto-pipelining
+ * Auto-pipelined
  */
 module.exports = class Standalone {
   status:
-    | 'disconnected'
-    | 'disconnecting'
-    | 'connecting'
-    | 'connected'
-    | 'error';
+    | STATUS_CONNECTED
+    | STATUS_CONNECTING
+    | STATUS_DISCONNECTED
+    | STATUS_DISCONNECTING;
 
-  constructor(options: StandaloneOptionsType) {
-    this.options = {};
+  constructor(options: StandaloneOptionsType = {}) {
     this.status = STATUS_DISCONNECTED;
 
-    this.commander = options.commander || new Commander();
+    // merge in default Standalone Connector options
+    this.options = merge(defaults.StandaloneConnection, options);
 
-    // tls accepts an existing socket so
-    // we can always just create one here
+    // allow specifying customer commander instance or create a new one
+    this.commander = this.options.commander || new Commander();
+
+    // tls accepts an existing socket so we can
+    // always just create one here in all cases
     this.socket = new Socket();
-
-    // create a new RESP parser for this connection
-    // we can parse it the commander instance as the options
-    // because this already implements the required return
-    // reply/error methods.
-    this.parser = new Parser(this.commander);
 
     // auto pipeline
     this.pipelineBuffer = '';
     this.pipelineQueued = 0;
     this.pipelineImmediate = null;
 
-    // cheap re-use of the sockets event emitter
-    // TODO do via Proxy
+    // cheap re-use of socket event emitter
     this.on = this.socket.on.bind(this.socket);
     this.emit = this.socket.emit.bind(this.socket);
     this.once = this.socket.once.bind(this.socket);
+    this.socket.on('data', this.commander.execute.bind(this.commander));
 
-    if (options.path) {
-      this.options.path = options.path;
-    } else {
-      this.options.port = options.port;
-      this.options.host = options.host;
-      this.options.family = options.family;
+    if (this.options.connector.autoConnect) {
+      process.nextTick(() => this.connect());
     }
 
-    if (options.tls) {
-      Object.assign(this.options, { tls: options.tls });
-      this.options.socket = this.socket;
+    if (this.options.connector.proxyCommander) {
+      return proxyThisAndThat(this, this.commander);
     }
   }
 
@@ -83,22 +77,20 @@ module.exports = class Standalone {
    */
   connect() {
     if (this.status === STATUS_CONNECTED || this.status === STATUS_CONNECTING) {
-      throw new Error('Connector is already connecting or connected!');
+      throw new Error(ERROR_ALREADY_CONNECTED);
     }
 
     this.status = STATUS_CONNECTING;
+    this.emit(this.status);
 
-    this.once('close', this._onClose);
-    this.once('connect', this._onConnect);
-    // TODO connect timeout checks
+    this.socket.once('close', this._onClose);
+    this.socket.once('connect', this._onConnect);
 
     if (this.options.tls) {
-      tls.connect(Object.assign({ socket: this.socket }, this.options));
+      tls.connect({ socket: this.socket, ...this.options });
     } else {
       this.socket.connect(this.options);
     }
-
-    this.on('data', this.parser.execute.bind(this.parser));
   }
 
   /**
@@ -108,6 +100,7 @@ module.exports = class Standalone {
     if (this.socket && this.status === STATUS_CONNECTED) {
       this.status = STATUS_DISCONNECTED;
       this.socket.end();
+      this.emit(this.status);
     }
   }
 
@@ -152,8 +145,8 @@ module.exports = class Standalone {
 
   _onConnect() {
     this.status = STATUS_CONNECTED;
-    // writes any buffered commands
     this.writePipeline();
+    this.emit(this.status);
   }
 
   _onClose(error: Error) {
@@ -163,5 +156,7 @@ module.exports = class Standalone {
       // TODO handle error logic & reconnect logic
       this.status = error ? 'error' : 'disconnected';
     }
+
+    this.emit(this.status);
   }
 };
