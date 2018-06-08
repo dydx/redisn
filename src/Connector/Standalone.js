@@ -28,7 +28,7 @@ export type StandaloneOptionsType = {
  *
  * Built in auto-pipelining
  */
-class Standalone {
+module.exports = class Standalone {
   status:
     | 'disconnected'
     | 'disconnecting'
@@ -57,7 +57,8 @@ class Standalone {
     this.pipelineQueued = 0;
     this.pipelineImmediate = null;
 
-    // cheap re-use of the sockets event emitter.
+    // cheap re-use of the sockets event emitter
+    // TODO do via Proxy
     this.on = this.socket.on.bind(this.socket);
     this.emit = this.socket.emit.bind(this.socket);
     this.once = this.socket.once.bind(this.socket);
@@ -155,7 +156,7 @@ class Standalone {
     this.writePipeline();
   }
 
-  _onClose(error) {
+  _onClose(error: Error) {
     if (this.status === STATUS_DISCONNECTING) {
       this.status = STATUS_DISCONNECTED;
     } else {
@@ -163,63 +164,4 @@ class Standalone {
       this.status = error ? 'error' : 'disconnected';
     }
   }
-}
-
-module.exports = Standalone;
-
-// const redis = new StandaloneConnector({ host: '127.0.0.1', port: 6379 });
-// redis.commander
-//   .set('moo', 'bar')
-//   .then(console.log)
-//   .catch(console.error);
-// redis.once('connect', r => {
-//   console.log('connected', r);
-// });
-// // redis.once('error', (err) => {
-// //   console.error(err);
-// // });
-// //
-// // redis.connect();
-// redis.commander
-//   .set('moo', 'bar')
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .get('moo')
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .info()
-//   .then(console.log)
-//   .catch(console.error);
-
-// redis.commander
-//   .ping()
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .ping()
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .ping()
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .ping()
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .set('moo', 'bar')
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .set('moo', 'bar')
-//   .then(console.log)
-//   .catch(console.error);
-// redis.commander
-//   .set('moo', 'bar')
-//   .then(console.log)
-//   .catch(console.error);
-
-// redis.connect();
+};
