@@ -50,63 +50,38 @@ function createBufferOfSize(parser, size, str) {
   return chunks;
 }
 
-function newParser(options, buffer) {
+class ExtendedParser extends Parser {
+  constructor(opts, noFatal) {
+    super(opts);
+    this._returnReply = this.options.returnReply || returnReply;
+    this._returnError = this.options.returnError || returnError;
+    this._returnFatalError =
+      this.options.returnFatalError ||
+      (noFatal ? this._returnError : returnFatalError);
+  }
+}
+
+function newParser(options, buffer, noFatal) {
   if (typeof options === 'function') {
     options = {
       returnReply: options,
       returnBuffers: buffer === 'buffer',
     };
   }
-  options.returnReply = options.returnReply || returnReply;
-  options.returnError = options.returnError || returnError;
-  options.returnFatalError = options.returnFatalError || returnFatalError;
-  return new Parser(options);
+  return new ExtendedParser(options, noFatal);
 }
 
 describe('Parser', () => {
-  describe('general', () => {
-    test('fail for missing options argument', () => {
-      assert.throws(
-        () => {
-          new Parser();
-        },
-        err => {
-          assert(err instanceof TypeError);
-          return true;
-        },
-      );
+  describe('parsing', () => {
+    let replyCount = 0;
+    beforeEach(() => {
+      replyCount = 0;
     });
 
-    test('fail for faulty options properties', () => {
-      assert.throws(
-        () => {
-          new Parser({
-            returnReply,
-            returnError: true,
-          });
-        },
-        err => {
-          assert.strictEqual(
-            err.message,
-            'The returnReply and returnError options have to be functions.',
-          );
-          assert(err instanceof TypeError);
-          return true;
-        },
-      );
-    });
-
-    test('should not fail for unknown options properties', () => {
-      new Parser({
-        returnReply,
-        returnError,
-        bla: 6,
-      });
-    });
-
-    test('reset returnBuffers option', () => {
+    test('returns buffers if option set', () => {
       const res = 'test';
       let replyCount = 0;
+
       function checkReply(reply) {
         if (replyCount === 0) {
           assert.strictEqual(reply, res);
@@ -115,85 +90,18 @@ describe('Parser', () => {
         }
         replyCount++;
       }
-      const parser = new Parser({
+
+      const parser = newParser({
         returnReply: checkReply,
         returnError,
       });
+
       parser.execute(Buffer.from('+test\r\n'));
       parser.execute(Buffer.from('+test'));
-      parser.setReturnBuffers(true);
+      parser.options.returnBuffers = true;
       assert.strictEqual(replyCount, 1);
       parser.execute(Buffer.from('\r\n$4\r\ntest\r\n'));
       assert.strictEqual(replyCount, 3);
-    });
-
-    test('reset returnBuffers option with wrong input', () => {
-      const parser = new Parser({
-        returnReply,
-        returnError,
-      });
-      assert.throws(
-        () => {
-          parser.setReturnBuffers(null);
-        },
-        err => {
-          assert.strictEqual(
-            err.message,
-            'The returnBuffers argument has to be a boolean',
-          );
-          assert(err instanceof TypeError);
-          return true;
-        },
-      );
-    });
-
-    test('reset stringNumbers option', () => {
-      const res = 123;
-      let replyCount = 0;
-      function checkReply(reply) {
-        if (replyCount === 0) {
-          assert.strictEqual(reply, res);
-        } else {
-          assert.strictEqual(reply, String(res));
-        }
-        replyCount++;
-      }
-      const parser = new Parser({
-        returnReply: checkReply,
-        returnError,
-      });
-      parser.execute(Buffer.from(':123\r\n'));
-      assert.strictEqual(replyCount, 1);
-      parser.setStringNumbers(true);
-      parser.execute(Buffer.from(':123\r\n'));
-      assert.strictEqual(replyCount, 2);
-    });
-
-    test('reset stringNumbers option with wrong input', () => {
-      const parser = new Parser({
-        returnReply,
-        returnError,
-      });
-      assert.throws(
-        () => {
-          parser.setStringNumbers(null);
-        },
-        err => {
-          assert.strictEqual(
-            err.message,
-            'The stringNumbers argument has to be a boolean',
-          );
-          assert(err instanceof TypeError);
-          return true;
-        },
-      );
-    });
-  });
-
-  describe('parsing', () => {
-    let replyCount = 0;
-    beforeEach(() => {
-      replyCount = 0;
     });
 
     test('reset parser', () => {
@@ -438,7 +346,7 @@ describe('Parser', () => {
         );
         errCount++;
       }
-      const parser = new Parser({
+      const parser = newParser({
         returnReply: checkReply,
         returnError: checkError,
         returnFatalError: checkError,
@@ -470,10 +378,14 @@ describe('Parser', () => {
         );
         errCount++;
       }
-      const parser = new Parser({
-        returnReply: checkReply,
-        returnError: checkError,
-      });
+      const parser = newParser(
+        {
+          returnReply: checkReply,
+          returnError: checkError,
+        },
+        null,
+        true,
+      );
 
       parser.execute(Buffer.from('*1\r\n+OK\r\n\n+zasd\r\n'));
       assert.strictEqual(replyCount, 1);
@@ -835,6 +747,28 @@ describe('Parser', () => {
       assert.strictEqual(replyCount, 0);
       parser.execute(Buffer.from('\r\n'));
       assert.strictEqual(replyCount, 1);
+    });
+
+    test('handle data with buffers', done => {
+      const size = 5.5 * 1024 * 1024;
+      const replyLen = [size, size * 2, 11, 11];
+      function checkReply(reply) {
+        assert.strictEqual(reply.length, replyLen[replyCount]);
+        replyCount++;
+      }
+      const parser = newParser(checkReply, 'buffer');
+      createBufferOfSize(parser, size);
+      assert.strictEqual(replyCount, 0);
+      createBufferOfSize(parser, size * 2, '\r\n');
+      assert.strictEqual(replyCount, 1);
+      parser.execute(Buffer.from('\r\n+hello world'));
+      assert.strictEqual(replyCount, 2);
+      parser.execute(Buffer.from('\r\n$11\r\nhuge'));
+      setTimeout(() => {
+        parser.execute(Buffer.from(' buffer\r\n'));
+        assert.strictEqual(replyCount, 4);
+        done();
+      }, 60);
     });
 
     test('handle big data 2 with buffers', done => {

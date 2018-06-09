@@ -1,12 +1,15 @@
 const tls = require('tls');
 const { Socket } = require('net');
-const toWritable = require('redis-writable');
 
-const { merge, defaults, strings, proxyThisAndThat } = require('./../Utils');
+const {
+  merge,
+  defaults,
+  strings,
+  eventSubscriptionWrapper,
+  proxyThisAndThat,
+} = require('./../Utils');
+
 const Commander = require('./../Commander/Commander');
-
-const MAX_QUEUED = 120;
-const MAX_BUFFER_SIZE = 4 * 1024 * 1024; // ~4 mb
 
 const {
   STATUS_CONNECTED,
@@ -25,45 +28,56 @@ export type StandaloneOptionsType = {
   commander: ?Commander,
 };
 
+export type ConnectionStatusType =
+  | STATUS_CONNECTED
+  | STATUS_CONNECTING
+  | STATUS_DISCONNECTED
+  | STATUS_DISCONNECTING;
+
+const Internals = new WeakMap();
+
 /**
  * Handles all communication with a single redis server
  * this includes connecting, writing resp and parsing resp.
  *
- * Auto-pipelined
  */
 module.exports = class Standalone {
-  status:
-    | STATUS_CONNECTED
-    | STATUS_CONNECTING
-    | STATUS_DISCONNECTED
-    | STATUS_DISCONNECTING;
-
   constructor(options: StandaloneOptionsType = {}) {
-    this.status = STATUS_DISCONNECTED;
+    Internals.set(this, {
+      eventSubscriptions: [],
+      status: STATUS_DISCONNECTED,
+    });
 
     // merge in default Standalone Connector options
     this.options = merge(defaults.StandaloneConnection, options);
 
-    // allow specifying customer commander instance or create a new one
-    this.commander = this.options.commander || new Commander();
+    // allow specifying custom commander instance
+    this.commander = options.commander;
+    //  or create a new one if none provided
+    if (!this.commander) {
+      this.commander = new Commander();
+      this.commander.setConnector(this);
+    }
 
     // tls accepts an existing socket so we can
     // always just create one here in all cases
     this.socket = new Socket();
 
-    // auto pipeline
-    this.pipelineBuffer = '';
-    this.pipelineQueued = 0;
-    this.pipelineImmediate = null;
-
     // cheap re-use of socket event emitter
-    this.on = this.socket.on.bind(this.socket);
+    this.on = eventSubscriptionWrapper(
+      this.socket,
+      this.socket.on.bind(this.socket),
+    );
+
+    this.once = eventSubscriptionWrapper(
+      this.socket,
+      this.socket.once.bind(this.socket),
+    );
+
     this.emit = this.socket.emit.bind(this.socket);
-    this.once = this.socket.once.bind(this.socket);
-    this.socket.on('data', this.commander.execute.bind(this.commander));
 
     if (this.options.connector.autoConnect) {
-      process.nextTick(() => this.connect());
+      process.nextTick(this.connect);
     }
 
     if (this.options.connector.proxyCommander) {
@@ -72,91 +86,90 @@ module.exports = class Standalone {
   }
 
   /**
+   * Get current connection status
+   */
+  get status(): ConnectionStatusType {
+    return Internals.get(this).status;
+  }
+
+  /**
+   * Set and emit connection status
+   * @param status
+   */
+  set status(status: ConnectionStatusType) {
+    Internals.get(this).status = status;
+    this.emit(this.status);
+  }
+
+  /**
    * Synchronous connect
    * @returns {*}
    */
-  connect() {
+  connect = () => {
     if (this.status === STATUS_CONNECTED || this.status === STATUS_CONNECTING) {
       throw new Error(ERROR_ALREADY_CONNECTED);
     }
 
+    this._reset();
+    this.socket.ref();
     this.status = STATUS_CONNECTING;
-    this.emit(this.status);
 
-    this.socket.once('close', this._onClose);
-    this.socket.once('connect', this._onConnect);
+    Internals.get(this).eventSubscriptions.push(
+      this.once('close', this._onClose),
+    );
+    Internals.get(this).eventSubscriptions.push(
+      this.once('connect', this._onConnect),
+    );
 
     if (this.options.tls) {
       tls.connect({ socket: this.socket, ...this.options });
     } else {
       this.socket.connect(this.options);
     }
-  }
+  };
 
   /**
    *
    */
-  disconnect() {
-    if (this.socket && this.status === STATUS_CONNECTED) {
-      this.status = STATUS_DISCONNECTED;
-      this.socket.end();
-      this.emit(this.status);
-    }
-  }
+  disconnect = () => {
+    this.socket.unref();
+    this.socket.destroy();
+    process.nextTick(this._reset);
+    this.status = STATUS_DISCONNECTED;
+  };
 
-  /**
-   *
-   * @param cmd
-   * @param args
-   * @param forceWrite
-   * @returns {string}
+  /** --------------
+   *     PRIVATE
+   ** --------------
    */
-  write(cmd: string, args: Array, forceWrite: boolean = false) {
-    this.pipelineBuffer += toWritable(cmd, args);
 
-    this.pipelineQueued++;
+  _onConnect = () => {
+    if (this.status === STATUS_CONNECTING) {
+      this.status = STATUS_CONNECTED;
 
-    // queue the write for the next event loop if this is the first command
-    if (this.pipelineQueued < 2) {
-      this.pipelineImmediate = setImmediate(this.writePipeline.bind(this));
+      Internals.get(this).eventSubscriptions.push(
+        this.socket.on('data', this.commander.execute.bind(this.commander)),
+      );
+
+      this.commander._writePipeline();
     }
+  };
 
-    // write pipeline if limits have been exceeded or this is a forced write
-    if (
-      forceWrite ||
-      this.pipelineQueued > MAX_QUEUED ||
-      this.pipelineBuffer.length > MAX_BUFFER_SIZE
-    ) {
-      clearImmediate(this.pipelineImmediate);
-      this.writePipeline();
-    }
-  }
-
-  /**
-   * Writes the current pipeline buffer and resets.
-   */
-  writePipeline() {
-    if (this.status === 'connected') {
-      this.socket.write(this.pipelineBuffer);
-      this.pipelineBuffer = '';
-      this.pipelineQueued = 0;
-    }
-  }
-
-  _onConnect() {
-    this.status = STATUS_CONNECTED;
-    this.writePipeline();
-    this.emit(this.status);
-  }
-
-  _onClose(error: Error) {
+  _onClose = (error: Error) => {
     if (this.status === STATUS_DISCONNECTING) {
       this.status = STATUS_DISCONNECTED;
     } else {
       // TODO handle error logic & reconnect logic
       this.status = error ? 'error' : 'disconnected';
     }
+  };
 
-    this.emit(this.status);
-  }
+  _reset = () => {
+    const { eventSubscriptions } = Internals.get(this);
+    for (let i = 0; i < eventSubscriptions.length; i++) {
+      eventSubscriptions[i]();
+    }
+
+    this.commander.reset();
+  };
 };

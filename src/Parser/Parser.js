@@ -4,6 +4,7 @@ const { Buffer } = require('buffer');
 const { StringDecoder } = require('string_decoder');
 
 const { ReplyError, ParserError } = require('./ParserErrors');
+const { defaults, merge } = require('./../Utils');
 
 let counter = 0;
 let interval = null;
@@ -95,7 +96,7 @@ function parseSimpleString(parser: Parser) {
     if (buffer[offset++] === 13) {
       // \r\n
       parser.offset = offset + 1;
-      if (parser.optionReturnBuffers === true) {
+      if (parser.options.returnBuffers === true) {
         return parser.buffer.slice(start, offset - 1);
       }
       return parser.buffer.toString('utf8', start, offset - 1);
@@ -134,7 +135,7 @@ function parseLength(parser: Parser) {
  * @returns {undefined|number|string}
  */
 function parseInteger(parser: Parser) {
-  if (parser.optionStringNumbers === true) {
+  if (parser.options.stringNumbers === true) {
     return parseStringNumbers(parser);
   }
   return parseSimpleNumbers(parser);
@@ -162,7 +163,7 @@ function parseBulkString(parser: Parser) {
   }
   const start = parser.offset;
   parser.offset = offset + 2;
-  if (parser.optionReturnBuffers === true) {
+  if (parser.options.returnBuffers === true) {
     return parser.buffer.slice(start, offset);
   }
   return parser.buffer.toString('utf8', start, offset);
@@ -176,7 +177,7 @@ function parseBulkString(parser: Parser) {
 function parseError(parser: Parser) {
   let string = parseSimpleString(parser);
   if (string !== undefined) {
-    if (parser.optionReturnBuffers === true) {
+    if (parser.options.returnBuffers === true) {
       string = string.toString();
     }
     return new ReplyError(string);
@@ -198,7 +199,7 @@ function handleError(parser: Parser, type: number) {
     parser.offset,
   );
   parser.buffer = null;
-  parser.returnFatalError(err);
+  parser._returnFatalError(err);
 }
 
 /**
@@ -428,26 +429,10 @@ function concatBulkBuffer(parser: Parser) {
 class Parser {
   /**
    * Javascript Redis Parser constructor
-   * @param {{returnError: Function, returnReply: Function, returnFatalError?: Function, returnBuffers: boolean, stringNumbers: boolean }} options
    * @constructor
    */
-  constructor(options) {
-    if (!options) {
-      throw new TypeError('Options are mandatory.');
-    }
-    if (
-      typeof options.returnError !== 'function' ||
-      typeof options.returnReply !== 'function'
-    ) {
-      throw new TypeError(
-        'The returnReply and returnError options have to be functions.',
-      );
-    }
-    this.setReturnBuffers(!!options.returnBuffers);
-    this.setStringNumbers(!!options.stringNumbers);
-    this.returnError = options.returnError;
-    this.returnFatalError = options.returnFatalError || options.returnError;
-    this.returnReply = options.returnReply;
+  constructor(options?: Object) {
+    this.options = merge(defaults.Parser, options || {});
     this.reset();
   }
 
@@ -464,32 +449,7 @@ class Parser {
     this.bufferCache = [];
     this.arrayCache = [];
     this.arrayPos = [];
-  }
-
-  /**
-   * Set the returnBuffers option
-   *
-   * @param {boolean} returnBuffers
-   * @returns {undefined}
-   */
-  setReturnBuffers(returnBuffers: boolean) {
-    if (typeof returnBuffers !== 'boolean') {
-      throw new TypeError('The returnBuffers argument has to be a boolean');
-    }
-    this.optionReturnBuffers = returnBuffers;
-  }
-
-  /**
-   * Set the stringNumbers option
-   *
-   * @param {boolean} stringNumbers
-   * @returns {undefined}
-   */
-  setStringNumbers(stringNumbers: boolean) {
-    if (typeof stringNumbers !== 'boolean') {
-      throw new TypeError('The stringNumbers argument has to be a boolean');
-    }
-    this.optionStringNumbers = stringNumbers;
+    clearInterval(interval);
   }
 
   /**
@@ -514,11 +474,11 @@ class Parser {
         if (arr === undefined) {
           return;
         }
-        this.returnReply(arr);
+        this._returnReply(arr);
       }
     } else if (this.totalChunkSize + buffer.length >= this.bigStrSize) {
       this.bufferCache.push(buffer);
-      let tmp = this.optionReturnBuffers
+      let tmp = this.options.returnBuffers
         ? concatBulkBuffer(this)
         : concatBulkString(this);
       this.bigStrSize = 0;
@@ -531,7 +491,7 @@ class Parser {
           return;
         }
       }
-      this.returnReply(tmp);
+      this._returnReply(tmp);
     } else {
       this.bufferCache.push(buffer);
       this.totalChunkSize += buffer.length;
@@ -550,9 +510,9 @@ class Parser {
       }
 
       if (type === 45) {
-        this.returnError(response);
+        this._returnError(response);
       } else {
-        this.returnReply(response);
+        this._returnReply(response);
       }
     }
 

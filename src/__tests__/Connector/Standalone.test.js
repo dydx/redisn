@@ -9,12 +9,14 @@ describe('StandaloneConnector', () => {
   test('creates commander instance if none specified in options', () => {
     const redis = new StandaloneConnector(DEFAULT_OPTIONS);
     expect(redis.commander).toBeInstanceOf(Commander);
+    redis.disconnect();
   });
 
   test('uses existing commander if provided in options', () => {
     const commander = new Commander();
     const redis = new StandaloneConnector({ ...DEFAULT_OPTIONS, commander });
     expect(redis.commander).toBe(commander);
+    redis.disconnect();
   });
 
   test('is an event emitter', () => {
@@ -22,6 +24,7 @@ describe('StandaloneConnector', () => {
     expect(typeof redis.on).toBe('function');
     expect(typeof redis.emit).toBe('function');
     expect(typeof redis.once).toBe('function');
+    redis.disconnect();
   });
 
   test.skip('Queues commands prior to connecting', () => {

@@ -1,3 +1,4 @@
+const { EventEmitter } = require('events');
 const { flatten, unflatten } = require('deeps');
 
 const strings = require('./strings');
@@ -25,6 +26,27 @@ function promisePending(): PendingPromiseType {
   return deferred;
 }
 
+/**
+ *
+ * @param emitter
+ * @param subscribeFn
+ * @returns {function(string, Function): function(): *}
+ */
+function eventSubscriptionWrapper(
+  emitter: EventEmitter,
+  subscribeFn: Function,
+) {
+  return function wrapper(event: string, fn: Function) {
+    subscribeFn(event, fn);
+    return () => emitter.removeListener(event, fn);
+  };
+}
+
+/**
+ *
+ * @param item
+ * @returns {Object|boolean}
+ */
 function isObject(item: Object): boolean {
   return item && typeof item === 'object' && !Array.isArray(item);
 }
@@ -65,4 +87,5 @@ module.exports = {
   defaults,
   promisePending,
   proxyThisAndThat,
+  eventSubscriptionWrapper,
 };
