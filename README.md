@@ -12,7 +12,7 @@
 
 ### Connectors
 
- - [ ] Standalone
+ - [x] Standalone
  - [ ] Sentinel
  - [ ] Cluster
  - [ ] Need something custom? The standalone connector is built to be extended upon, both Sentinel and Cluster connectors extend from Standalone - so you can do the same for your custom connection / command routing logic.
@@ -21,6 +21,12 @@
 
 - [ ] String or Function key prefixing
 - [ ] String or Function pubsub event prefixing
+
+### Extensibility
+
+- [ ] Build custom Hooks to extend/provide functionality
+- [ ] Advanced custom LUA scripting functionality
+- [ ] Human friendly PUBSUB, losely based on node's Event Emitter API
 
 `Features list is WIP. Make an issue for any other features you'd like to see.`
 
