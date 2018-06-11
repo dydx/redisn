@@ -6,7 +6,23 @@
 [![License](https://img.shields.io/npm/l/redisn.svg)](/LICENSE)
 <a href="https://twitter.com/mikediarmid"><img src="https://img.shields.io/twitter/follow/mikediarmid.svg?style=social&label=Follow" alt="Follow on Twitter"></a>
 
-> The next generation of redis client for Node.js. A modern, ultra performant and feature rich implementation.
+> A work in progress next generation of redis client for Node.js. A modern, ultra performant and feature rich implementation.
+
+## Planned Features
+
+### Connectors
+
+ - [ ] Standalone
+ - [ ] Sentinel
+ - [ ] Cluster
+ - [ ] Need something custom? The standalone connector is built to be extended upon, both Sentinel and Cluster connectors extend from Standalone - so you can do the same for your custom connection / command routing logic.
+ 
+### Prefixing
+
+- [ ] String or Function key prefixing
+- [ ] String or Function pubsub event prefixing
+
+`Features list is WIP. Make an issue for any other features you'd like to see.`
 
 ## Install
 
